@@ -15,7 +15,18 @@ import requests
 LIMIT = 1900  # 2000文字制限に余裕を持たせる
 
 ACTION_JA = {"buy": "買い", "sell": "売り", "hold": "見送り"}
-DISCLAIMER = "※ 過去検証で優位性が確認できていないルールの参考情報です。発注は自分の判断で。"
+DISCLAIMER = "※参考情報（優位性は未検証）。発注は自分の判断で。"
+
+# 数値から機械的に決まる項目（Yes が良い状態）
+RULE_CHECKS = [
+    ("long_trend_up", "長期は上昇トレンド"),
+    ("short_trend_up", "短期も上向き"),
+    ("not_overheated", "過熱していない"),
+    ("month_positive", "直近1か月プラス"),
+    ("market_up", "市場全体が上昇基調"),
+]
+# Claude がニュースから答える項目（Yes が注意すべき状態）
+NEWS_CHECKS = [("earnings_soon", "決算が近い"), ("bad_news", "悪材料ニュースあり")]
 
 
 def money(v, currency: str) -> str:
@@ -24,53 +35,58 @@ def money(v, currency: str) -> str:
     return f"{v:,.0f}円" if currency == "JPY" else f"${v:,.2f}"
 
 
+def yes_no(value, yes_is_good: bool = True) -> str:
+    """True/False/None（または "yes"/"no"/"unknown"）を Yes / No / 不明 に。良い状態に ✅、注意に ⚠️。"""
+    if value in (None, "unknown"):
+        return "❓ 不明"
+    yes = value in (True, "yes")
+    return f"{'✅' if yes == yes_is_good else '⚠️'} {'Yes' if yes else 'No'}"
+
+
 def format_header(sig: dict) -> str:
     bm = sig["benchmark"]
-    trend = "SMA200より上（上昇基調）" if bm["above_sma200"] else "SMA200より下（下落基調）"
     lines = [
-        f"**【{sig['market']}】{sig['date']} 終値時点のシグナル**",
-        f"買い {len(sig['buys'])}件 / 売り {len(sig['sells'])}件 / 本日の損切り到達 {len(sig['stopped_today'])}件",
-        f"市場全体（{bm['symbol']}）: {trend}、3か月 {bm['ret_3m']:+.1%}",
+        f"**【{sig['market']}】{sig['date']} 終値** 買い{len(sig['buys'])} / 売り{len(sig['sells'])} / "
+        f"損切り到達{len(sig['stopped_today'])}",
         DISCLAIMER,
     ]
     for s in sig["stopped_today"]:
-        lines.append(f"・損切り到達: {s['name']}（{s['symbol']}）損益 {s['pnl_pct']:+.1%}")
+        lines.append(f"・損切り到達: {s['name']}（{s['symbol']}）{s['pnl_pct']:+.1%}")
     return "\n".join(lines)
 
 
-def format_proposal(sig_item: dict, kind: str, proposal: dict | None, currency: str, error: str | None = None) -> str:
-    head = f"**{'🟢 買い' if kind == 'buy' else '🔴 売り'}シグナル: {sig_item['name']}（{sig_item['symbol']}）**"
-    if kind == "buy":
-        rule = (f"ルール: モメンタム順位 {sig_item['rank']}位 / 終値 {money(sig_item['close'], currency)} / "
-                f"目安 {sig_item['shares']:,.0f}株 / 損切り目安 {money(sig_item['stop_ref'], currency)}"
-                f"（翌営業日の始値で買う想定）")
+def format_proposal(sig_item: dict, kind: str, proposal: dict | None, currency: str,
+                    error: str | None = None, checks: dict | None = None) -> str:
+    icon, label = ("🟢", "買い候補") if kind == "buy" else ("🔴", "売り候補")
+    if proposal is not None:
+        verdict = f"Claude: **{ACTION_JA[proposal['action']]}**（{proposal['confidence']:.0%}）"
     else:
-        rule = (f"ルール: {sig_item['reason_text']} / 終値 {money(sig_item['close'], currency)} / "
-                f"モデル上の損益 {sig_item['pnl_pct']:+.1%}（{sig_item['entry_date']} 取得）")
-    lines = [head, rule]
-    if proposal is None:
-        lines.append(f"Claude の判断案: なし（{error or 'Claude 判断は無効'}）")
-        return "\n".join(lines)
-    lines.append(f"**Claude の判断案: {ACTION_JA[proposal['action']]}**（確信度 {proposal['confidence']:.0%}）")
-    lines += [f"根拠: " + " / ".join(proposal["reasons"])]
-    lines += [f"懸念: " + " / ".join(proposal["risks"])]
-    lines.append(f"エントリー {money(proposal['entry'], currency)} / 損切り {money(proposal['stop_loss'], currency)} / "
-                 f"利確 {money(proposal['take_profit'], currency)}")
-    lines.append(f"判断が誤りと分かる条件: {proposal['invalidation']}")
-    for n in proposal["news"][:3]:
-        lines.append(f"📰 {n['title']} — {n['impact']} <{n['url']}>")
+        verdict = "Claude: 判断なし"
+    lines = [f"{icon} **{label}: {sig_item['name']}（{sig_item['symbol']}）** → {verdict}"]
+    if proposal is not None:
+        lines.append(proposal["summary"])
+    elif error:
+        lines.append(f"（{error}）")
+    if kind == "buy":
+        lines.append(f"終値 {money(sig_item['close'], currency)} / {sig_item['shares']:,.0f}株 / "
+                     f"損切り {money(sig_item['stop_ref'], currency)}")
+    else:
+        lines.append(f"{sig_item['reason_text']} / 終値 {money(sig_item['close'], currency)} / "
+                     f"損益 {sig_item['pnl_pct']:+.1%}")
+    checks = checks or (proposal or {}).get("checks") or {}
+    if kind == "buy":
+        lines += [f"{text}: {yes_no(checks.get(key))}" for key, text in RULE_CHECKS if key in checks]
+    if proposal is not None:
+        lines += [f"{text}: {yes_no(proposal[key], yes_is_good=False)}" for key, text in NEWS_CHECKS]
+        for n in proposal["news"][:1]:
+            lines.append(f"📰 {n['title'][:60]} <{n['url']}>")
     return "\n".join(lines)
 
 
 def format_holdings(sig: dict) -> str:
-    lines = [f"**モデルポートフォリオ（{sig['model_start']} 開始の仮想運用。実際の保有とは別）**",
-             f"評価額 {money(sig['model_equity'], sig['currency'])}（開始時 {money(sig['model_initial_cash'], sig['currency'])}）"]
-    for h in sig["holdings"]:
-        mark = " ←売り予定" if h["sell_pending"] else ""
-        lines.append(f"・{h['name']}（{h['symbol']}）{h['pnl_pct']:+.1%} 損切り {money(h['stop'], sig['currency'])}{mark}")
-    if not sig["holdings"]:
-        lines.append("・保有なし")
-    return "\n".join(lines)
+    items = [f"{h['name']} {h['pnl_pct']:+.1%}{'（売り予定）' if h['sell_pending'] else ''}" for h in sig["holdings"]]
+    return (f"**仮想運用の保有**（実際の保有とは別）評価額 {money(sig['model_equity'], sig['currency'])}\n"
+            + (" / ".join(items) if items else "保有なし"))
 
 
 def split_message(text: str, limit: int = LIMIT) -> list[str]:

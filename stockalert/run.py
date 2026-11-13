@@ -81,11 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     for kind, items in (("sell", sig["sells"]), ("buy", sig["buys"])):
         for item in items:
             proposal, error = None, None
+            packet = judge.build_packet(conn, item, kind, sig)
             if client is None:
                 error = client_error
             else:
                 try:
-                    packet = judge.build_packet(conn, item, kind, sig)
                     news = judge.research_news(client, item["name"], item["symbol"], sig["date"]) if use_news else None
                     proposal = judge.judge(client, packet, news)
                 except Exception as exc:  # noqa: BLE001 - Claude が失敗してもルールのシグナルは届ける
@@ -96,7 +96,10 @@ def main(argv: list[str] | None = None) -> int:
             if not args.dry_run:
                 proposals.record(state, market, sig["date"], kind, item, proposal,
                                  judge.MODEL if proposal else None, error)
-            messages.append(notify.format_proposal(item, kind, proposal, sig["currency"], error))
+            messages.append(notify.format_proposal(item, kind, proposal, sig["currency"], error, packet["checks"]))
+    u = judge.usage_total
+    print(f"Claude 使用量（{judge.MODEL}）: 呼び出し {u['calls']}回 / 入力 {u['input_tokens']:,} トークン / "
+          f"出力 {u['output_tokens']:,} トークン / Web検索 {u['web_searches']}回")
     messages.append(notify.format_holdings(sig))
 
     if args.dry_run:

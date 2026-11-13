@@ -12,7 +12,10 @@ SELL = {"symbol": "6758.JP", "name": "ソニーグループ", "reason": "below_s
         "shares": 100.0, "entry_date": "2026-01-05", "close": 2800.0, "pnl_pct": -0.05}
 PROPOSAL = {"symbol": "7203.JP", "action": "buy", "reasons": ["終値3000はSMA200の2700より上"], "risks": ["RSIが75と高い"],
             "entry": 3000.0, "stop_loss": 2860.0, "take_profit": None, "invalidation": "終値が2860を下回る",
-            "confidence": 0.4, "news": [{"title": "決算発表", "url": "https://example.com/a", "impact": "中立"}]}
+            "confidence": 0.4, "summary": "長期は強いが決算直前のため様子見", "earnings_soon": "yes", "bad_news": "no",
+            "news": [{"title": "決算発表", "url": "https://example.com/a", "impact": "中立"}]}
+CHECKS = {"long_trend_up": True, "short_trend_up": False, "not_overheated": True, "month_positive": False,
+          "market_up": None}
 
 
 # ---- Claude 判断層 ----------------------------------------------------------
@@ -24,7 +27,7 @@ class FakeClient:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = []
-        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
+        self.messages = SimpleNamespace(create=self._create)
 
     def _create(self, **kwargs):
         self.calls.append(kwargs)
@@ -32,7 +35,8 @@ class FakeClient:
 
 
 def packet(kind="buy"):
-    return {"signal": {"kind": kind, "symbol": "7203.JP"}, "name": "トヨタ自動車", "indicators": {"close": 3000.0}}
+    return {"signal": {"kind": kind, "symbol": "7203.JP"}, "name": "トヨタ自動車", "indicators": {"close": 3000.0},
+            "checks": CHECKS}
 
 
 def test_judge_sends_data_and_schema_and_parses_json():
@@ -41,12 +45,12 @@ def test_judge_sends_data_and_schema_and_parses_json():
 
     assert out["action"] == "buy" and out["take_profit"] is None
     call = client.calls[0]
-    assert call["model"] == "claude-opus-5-5"
-    assert call["output_config"]["format"] == {"type": "json_schema", "schema": judge.PROPOSAL_SCHEMA}
-    assert call["fallbacks"] == "default" and call["betas"] == ["server-side-fallback-2026-07-01"]
+    assert call["model"] == "claude-haiku-5-5"  # 費用を抑えるため既定は最も安いモデル
+    assert call["output_config"] == {"effort": "low", "format": {"type": "json_schema", "schema": judge.PROPOSAL_SCHEMA}}
+    assert out["checks"] == CHECKS  # 機械判定の Yes/No も判断案に付く
     assert "tools" not in call  # 判断の呼び出しでは検索させない（渡したデータだけで判断）
     user = call["messages"][0]["content"]
-    assert '"close": 3000.0' in user and "https://example.com/a" in user
+    assert '"close":3000.0' in user and "https://example.com/a" in user
 
 
 def test_judge_rejects_wrong_action_refusal_and_clamps_confidence():
@@ -64,7 +68,7 @@ def test_research_news_uses_web_search_and_resumes_paused_turn():
     client = FakeClient([text_resp("", stop_reason="pause_turn"), text_resp("重要なニュースは見つからなかった")])
     out = judge.research_news(client, "トヨタ自動車", "7203.JP", "2026-11-13")
     assert out == "重要なニュースは見つからなかった"
-    assert client.calls[0]["tools"] == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 3}]
+    assert client.calls[0]["tools"] == [{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}]
     assert client.calls[1]["messages"][-1]["role"] == "assistant"  # 途中停止した応答を付けて続きを要求
 
 
@@ -87,14 +91,34 @@ def test_make_client_returns_none_without_key(monkeypatch):
 
 
 # ---- 通知 -------------------------------------------------------------------
-def test_format_proposal_with_and_without_claude():
-    text = notify.format_proposal(BUY, "buy", PROPOSAL, "JPY")
-    assert "トヨタ自動車（7203.JP）" in text and "200株" in text and "2,860円" in text
-    assert "Claude の判断案: 買い" in text and "確信度 40%" in text and "利確 —" in text
-    assert "<https://example.com/a>" in text
+def test_format_proposal_is_short_yes_no_list():
+    text = notify.format_proposal(BUY, "buy", dict(PROPOSAL, checks=CHECKS), "JPY")
+    lines = text.split("\n")
+    assert lines[0] == "🟢 **買い候補: トヨタ自動車（7203.JP）** → Claude: **買い**（40%）"
+    assert lines[1] == "長期は強いが決算直前のため様子見"
+    assert lines[2] == "終値 3,000円 / 200株 / 損切り 2,860円"
+    assert "長期は上昇トレンド: ✅ Yes" in lines and "短期も上向き: ⚠️ No" in lines
+    assert "市場全体が上昇基調: ❓ 不明" in lines
+    assert "決算が近い: ⚠️ Yes" in lines and "悪材料ニュースあり: ✅ No" in lines  # こちらは Yes が注意
+    assert lines[-1] == "📰 決算発表 <https://example.com/a>"
+    assert len(text) < 400  # 以前は1銘柄で1000字超だった
+
+
+def test_format_proposal_without_claude_and_sell():
+    text = notify.format_proposal(BUY, "buy", None, "JPY", error="APIエラー", checks=CHECKS)
+    assert "Claude: 判断なし" in text and "（APIエラー）" in text and "過熱していない: ✅ Yes" in text
+    assert "決算が近い" not in text  # Claude に聞いていない項目は出さない
     text = notify.format_proposal(SELL, "sell", None, "JPY", error="APIエラー")
-    assert "売りシグナル" in text and "-5.0%" in text and "なし（APIエラー）" in text
+    assert "🔴 **売り候補: ソニーグループ（6758.JP）**" in text and "損益 -5.0%" in text
     assert notify.money(123.456, "USD") == "$123.46"
+
+
+def test_rule_checks_from_numbers():
+    ind = {"close": 110.0, "sma20": 112.0, "sma50": 105.0, "sma200": 100.0, "rsi14": 72.0, "ret_1m_pct": 3.0}
+    assert judge.rule_checks(ind, {"above_sma200": False}) == {
+        "long_trend_up": True, "short_trend_up": False, "not_overheated": False,
+        "month_positive": True, "market_up": False}
+    assert judge.rule_checks(dict(ind, rsi14=None), {"above_sma200": True})["not_overheated"] is None
 
 
 def test_split_message_respects_limit():
