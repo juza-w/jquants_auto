@@ -1,0 +1,6 @@
+requests
+pandas
+python-dotenv
+yfinance
+tzdata
+pytest
