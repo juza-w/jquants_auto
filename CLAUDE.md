@@ -44,9 +44,12 @@ M4〜M6 も GitHub Actions 上で実API（Claude・Web検索・Discord）の動�
 - `GET /v2/equities/master` の行: `Date, Code, CoName, CoNameEn, S17, S17Nm, S33, S33Nm, ScaleCat, Mkt, MktNm, Mrgn, MrgnNm, ProdCat`。
 - 公式リファレンス: `https://jpx-jquants.com/ja/spec/<ページ名>`（eq-bars-daily, rate-limits, pagination, data-update, data-spec, mkt-cal, idx-bars-daily-topix）。
 - Discord Execute Webhook: POST <URL>?wait=true、JSON `{"content": ...}`、2000文字まで（公式ドキュメントで確認）。
-- Claude API（anthropic SDK 2.8 の型で確認）: `client.beta.messages.create(model="claude-opus-5-5", betas=["server-side-fallback-2026-07-01"],
-  fallbacks="default", output_config={"effort":..., "format": {"type":"json_schema","schema":...}})`、
-  Web検索は `tools=[{"type":"web_search_20260209","name":"web_search","max_uses":3}]`。実APIで動作確認済み。
+- Claude API（実APIで動作確認済み）: `client.messages.create(model="claude-haiku-5-5", max_tokens=4000,
+  output_config={"effort": "low", "format": {"type":"json_schema","schema":...}})`、
+  Web検索は `tools=[{"type":"web_search_20250305","name":"web_search","max_uses":2}]`。
+  費用削減のため既定を Haiku 5.5 にした（開発者の要望。`CLAUDE_MODEL` で変更可）。Opus 5.5 + `web_search_20260209` +
+  `fallbacks="default"`（beta `server-side-fallback-2026-07-01`）の組み合わせも動作確認済みだが、5銘柄で約$1かかった。
+  Haiku 5.5 では5銘柄で 入力11.3万・出力1.6万トークン・検索10回。実行ログに「Claude 使用量」が出る。
   クラウドの開発環境からは Claude API を呼べない（キーを渡せない）ので、確認は GitHub Actions で行う。
 - yfinance 1.8 `Ticker.history(auto_adjust=False, actions=True)`: 列 `Open, High, Low, Close, Adj Close, Volume, Dividends, Stock Splits`、
   インデックスは America/New_York。Close は分割調整済み。
@@ -74,3 +77,4 @@ M4〜M6 も GitHub Actions 上で実API（Claude・Web検索・Discord）の動�
 5. 入れ替え判断日を「週の最初の営業日」に変更済み（本番で翌営業日を知らずに判定するため）。
 6. 初回の実運用テストでは Claude の判断が5件すべて「見送り」（決算直前・短期の勢い低下が理由）。
    慎重すぎるかどうかは proposals の実績（見送った銘柄のその後）で判断する。
+7. 通知は開発者の要望で短い Yes/No 形式（1銘柄あたり約250字）。長文に戻さない。詳しい根拠は proposals に記録される。
