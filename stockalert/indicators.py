@@ -90,4 +90,5 @@ def compute_indicators(bars: pd.DataFrame) -> pd.DataFrame:
         df[name] = c / c.shift(n) - 1                  # 騰落率
     # 6か月モメンタム（直近1か月を除く）: 6か月前 → 1か月前 の騰落率
     df["mom_6_1"] = c.shift(DAYS_1M) / c.shift(DAYS_6M) - 1
+    df["mom_12_1"] = c.shift(DAYS_1M) / c.shift(DAYS_12M) - 1  # 12か月版（学術研究で標準的な形）
     return df

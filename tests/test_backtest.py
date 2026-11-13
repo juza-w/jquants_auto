@@ -14,7 +14,7 @@ PARAMS = StrategyParams(top_n=1, min_turnover=0, lot_size=1)
 def make_panels(symbols: dict) -> dict:
     """symbols: {銘柄: {項目: 値 or 日ごとのリスト}}。省略した項目は「買い条件を満たす」既定値。"""
     base = {"adj_open": 110.0, "adj_high": 112.0, "adj_low": 108.0, "adj_close": 110.0, "close": 110.0,
-            "sma50": 100.0, "sma200": 90.0, "atr14": 5.0, "mom_6_1": 0.2, "avg_turnover20": 1e9}
+            "sma50": 100.0, "sma200": 90.0, "atr14": 5.0, "mom_6_1": 0.2, "mom_12_1": 0.2, "avg_turnover20": 1e9}
     panels = {}
     for f, default in base.items():
         cols = {}
@@ -76,7 +76,7 @@ def test_exit_when_close_below_sma50_executes_next_open():
                                           "adj_open": opn, "adj_low": low}}),
                        PARAMS, NO_COST, DATES[0], DATES[5], 10_000)
     t = res.trades[0]
-    assert (t["exit_date"], t["reason"]) == ("2024-01-10", "below_sma50")  # 水曜の始値107で売る
+    assert (t["exit_date"], t["reason"]) == ("2024-01-10", "below_sma")  # 水曜の始値107で売る
     assert t["pnl"] == pytest.approx(10 * (107 - 110))
 
 
@@ -114,3 +114,28 @@ def test_cagr_and_max_drawdown_by_hand():
     s = pd.Series([100.0, 120.0, 90.0, 121.0], index=["2022-01-01", "2022-07-01", "2023-01-01", "2024-01-01"])
     assert cagr(s) == pytest.approx(0.1, abs=1e-3)       # 2年で1.21倍 = 年率10%
     assert max_drawdown(s) == pytest.approx(90 / 120 - 1)  # 120 → 90 で −25%
+
+
+def test_hold_rank_keeps_position_that_slipped_slightly():
+    """上位1で買い、2位以内なら持ち続ける設定では、順位が1つ落ちただけでは売らない。"""
+    mom_a = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.1, 0.1]
+    mom_b = [0.2] * 8  # 2週目の金曜に B が A を逆転
+    params = StrategyParams(top_n=1, hold_rank=2, lot_size=1)
+    res = run_backtest(make_panels({"A": {"mom_6_1": mom_a}, "B": {"mom_6_1": mom_b}}),
+                       params, NO_COST, DATES[0], DATES[7], 10_000)
+    assert res.trades == [] and res.open_positions == 1  # A を持ったまま。枠は1なので B は買わない
+
+
+def test_monthly_rebalance_and_exit_sma_option():
+    from stockalert.backtest import is_rebalance_day
+
+    assert is_rebalance_day("2024-01-31", "2024-02-01", "monthly")
+    assert not is_rebalance_day("2024-01-26", "2024-01-29", "monthly")  # 週末だが月末ではない
+    assert is_rebalance_day("2024-01-26", "2024-01-29", "weekly")
+
+    # 終値104は SMA50(105) を下回るが SMA200(90) より上 → exit_sma="sma200" なら売らない
+    close = [110.0, 110.0, 110.0, 104.0, 106.0, 106.0, 106.0, 106.0]
+    sma50 = [100.0, 100.0, 100.0, 105.0, 105.0, 105.0, 105.0, 105.0]
+    panels = make_panels({"A": {"adj_close": close, "close": close, "sma50": sma50, "adj_low": [103.0] * 8}})
+    res = run_backtest(panels, StrategyParams(top_n=1, exit_sma="sma200"), NO_COST, DATES[0], DATES[5], 10_000)
+    assert res.trades == [] and res.open_positions == 1

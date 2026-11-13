@@ -21,7 +21,7 @@ from .indicators import compute_indicators, load_bars
 from .sources.base import split_symbol
 from .strategy import BENCHMARKS, JP_PARAMS, US_PARAMS, StrategyParams, position_size, rank_candidates, stop_price
 
-FIELDS = ["adj_open", "adj_high", "adj_low", "adj_close", "close", "sma50", "sma200", "atr14", "mom_6_1", "avg_turnover20"]
+FIELDS = ["adj_open", "adj_high", "adj_low", "adj_close", "close", "sma50", "sma200", "atr14", "mom_6_1", "mom_12_1", "avg_turnover20"]
 
 
 @dataclass(frozen=True)
@@ -121,21 +121,26 @@ def run_backtest(panels: dict[str, pd.DataFrame], params: StrategyParams, costs:
         # 4) 終値が確定した後に、翌営業日の注文を決める
         snap = pd.DataFrame({
             "close": c, "sma50": panels["sma50"].loc[day], "sma200": panels["sma200"].loc[day],
-            "mom_6_1": panels["mom_6_1"].loc[day], "avg_turnover20": panels["avg_turnover20"].loc[day],
+            params.mom_col: panels[params.mom_col].loc[day], "avg_turnover20": panels["avg_turnover20"].loc[day],
             "atr14": panels["atr14"].loc[day],
         })
-        for sym in positions:  # 毎日: 終値 < SMA50 なら手仕舞い
-            if c[sym] < snap.loc[sym, "sma50"]:
-                pending_sells.setdefault(sym, "below_sma50")
+        for sym in positions:  # 毎日: 終値 < 移動平均 なら手仕舞い
+            if c[sym] < snap.loc[sym, params.exit_sma]:
+                pending_sells.setdefault(sym, "below_sma")
 
-        if i + 1 < len(dates) and _is_week_end(day, dates[i + 1]):  # 週1回: 入れ替え
-            top = rank_candidates(snap, params)[: params.top_n]
+        if i + 1 < len(dates) and is_rebalance_day(day, dates[i + 1], params.rebalance):  # 定期の入れ替え
+            ranked = rank_candidates(snap, params)
+            keep = set(ranked[: params.keep_rank])
             for sym in positions:
-                if sym not in top:
+                if sym not in keep:
                     pending_sells.setdefault(sym, "rank_out")
-            for sym in top:
+            slots = params.top_n - sum(1 for s in positions if s not in pending_sells)
+            for sym in ranked[: params.top_n]:
+                if slots <= 0:
+                    break
                 if sym in positions:
                     continue
+                slots -= 1
                 atr = snap.loc[sym, "atr14"]
                 lot = params.lot_size * panels["close"].loc[day, sym] / c[sym]
                 shares = position_size(equity, atr, params, lot)
@@ -149,8 +154,10 @@ def run_backtest(panels: dict[str, pd.DataFrame], params: StrategyParams, costs:
     return result
 
 
-def _is_week_end(day: str, next_day: str) -> bool:
-    """day がその週の最後の営業日か（次の営業日が別の週なら True）。"""
+def is_rebalance_day(day: str, next_day: str, rebalance: str) -> bool:
+    """day がその週（または月）の最後の営業日か。次の営業日が別の週・月なら True。"""
+    if rebalance == "monthly":
+        return day[:7] != next_day[:7]
     a, b = pd.Timestamp(day).isocalendar(), pd.Timestamp(next_day).isocalendar()
     return (a.year, a.week) != (b.year, b.week)
 

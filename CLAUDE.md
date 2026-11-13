@@ -20,12 +20,12 @@
 
 ## 現状（2026-11-13）
 
-M1〜M3 実装済み、pytest 30件成功。M4〜M6 未着手。構成:
+M1〜M3 実装済み、pytest 32件成功。GitHub: juza-w/jquants_auto（main）。M4〜M6 未着手。構成:
 
 - `stockalert/sources/base.py` DataSource インターフェースと共通列
 - `stockalert/sources/jquants.py` 日本株 / `yfinance_source.py` 米国株（将来 moomoo に差し替え）
 - `stockalert/db.py` SQLite upsert / `updater.py` 増分更新と分割検知 / `update.py` 実行入口
-- `stockalert/indicators.py` 指標 / `strategy.py` 戦略v1のルール / `backtest.py` 検証
+- `stockalert/indicators.py` 指標 / `strategy.py` 戦略のルール（現在 v2）/ `backtest.py` 検証 / `scripts/grid_search.py` 作る用期間だけの比較
 - `watchlist.txt` 日本 TOPIX100 + 米国50 + ベンチマーク（1306.JP, SPY.US）
 
 ## 確認済みの事実
@@ -47,16 +47,18 @@ M1〜M3 実装済み、pytest 30件成功。M4〜M6 未着手。構成:
 - `adj_close` は分割のみ調整（配当なし）で日米を統一。
 - 分割検知は取得元に依存しない方法（取り直した範囲の adj_close が保存値と0.1%超ずれたら全取得）。
 - 売買ルールは `strategy.py` に集約し、バックテストと本番シグナルで同じ関数を使う。
-- 買い条件に「終値 >= SMA50」を追加（手仕舞い条件に既に当たる銘柄を買わないため）。
+- 買い条件に「終値 >= 手仕舞い用の移動平均」を追加（手仕舞い条件に既に当たる銘柄を買わないため）。
+- 戦略は開発者から一任され v2 に変更（SMA200で手仕舞い、上位10で買い30位まで保有、10銘柄）。
+  検証用期間は v2 で1回使用済み。**これ以上、検証用期間を見ながらルールを変えない。**
+  結果: 日本は検証用でBM未満（不採用）、米国は僅差でBM超え（生存者バイアスあり）。
 - バックテストは終値で判断 → 翌営業日の始値で約定。コスト・資金は `backtest.py` の `MARKETS`（仮定値）。
 
 ## 未解決（開発者に確認が必要）
 
-1. 戦略v1 はベンチマークに大敗（README の表）。不採用にするか、作る用期間だけでルールを見直すか。
+1. 日本株は v2 も不採用相当。通知は米国株だけにするか、日本株は「参考」として出すか。
 2. 実際の資金額と証券会社の手数料（バックテストの仮定値を直す）。
 3. 通知先（仕様は Discord webhook。メール・LINE の希望もあり）。
 4. どこで定期実行するか（Windows のタスクスケジューラ / GitHub Actions など）。
-5. コードの置き場所（まだ GitHub リポジトリがない）。
 
 ## 残作業
 
