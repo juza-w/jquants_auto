@@ -5,8 +5,8 @@ import pytest
 from stockalert.backtest import Costs, cagr, max_drawdown, run_backtest
 from stockalert.strategy import StrategyParams, position_size, rank_candidates
 
-# 2024-01-04(木) 05(金) | 08(月) 09(火) 10(水) 11(木) 12(金) | 15(月)
-DATES = ["2024-01-04", "2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-15"]
+# 2024-01-05(金) | 08(月) 09(火) 10(水) 11(木) 12(金) | 15(月) 16(火)
+DATES = ["2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10", "2024-01-11", "2024-01-12", "2024-01-15", "2024-01-16"]
 NO_COST = Costs(commission=0.0, slippage=0.0)
 PARAMS = StrategyParams(top_n=1, min_turnover=0, lot_size=1)
 
@@ -43,19 +43,19 @@ def test_position_size_risks_one_percent():
 
 
 def test_entry_at_next_open_and_stop_loss_costs_about_one_percent():
-    low = [108.0, 108.0, 108.0, 99.0, 108.0, 108.0, 108.0, 108.0]  # 火曜に安値99
-    opn = [110.0, 110.0, 111.0, 110.0, 110.0, 110.0, 110.0, 110.0]  # 月曜の始値111
+    low = [108.0, 108.0, 108.0, 99.0, 108.0, 108.0, 108.0, 108.0]  # 水曜に安値99
+    opn = [110.0, 110.0, 111.0, 110.0, 110.0, 110.0, 110.0, 110.0]  # 火曜の始値111
     res = run_backtest(make_panels({"A": {"adj_low": low, "adj_open": opn}}), PARAMS, NO_COST,
                        DATES[0], DATES[4], 10_000)
-    # 金曜の終値で判断 → 月曜の始値111で 10000×1%÷(2×5)=10株 買う。損切り = 111−10 = 101
-    # 火曜に安値99 → 101で決済。損失 = 10株×10 = 100（資金の1%）
+    # 月曜の終値で判断 → 火曜の始値111で 10000×1%÷(2×5)=10株 買う。損切り = 111−10 = 101
+    # 水曜に安値99 → 101で決済。損失 = 10株×10 = 100（資金の1%）
     assert len(res.trades) == 1
     t = res.trades[0]
-    assert (t["entry_date"], t["exit_date"], t["reason"]) == ("2024-01-08", "2024-01-09", "stop")
+    assert (t["entry_date"], t["exit_date"], t["reason"]) == ("2024-01-09", "2024-01-10", "stop")
     assert t["pnl"] == pytest.approx(-100.0)
-    assert res.equity["2024-01-05"] == 10_000          # シグナル当日はまだ買っていない
-    assert res.equity["2024-01-08"] == pytest.approx(10_000 - 10 * 1)  # 111で買って終値110
-    assert res.equity["2024-01-10"] == pytest.approx(9_900)
+    assert res.equity["2024-01-08"] == 10_000          # シグナル当日はまだ買っていない
+    assert res.equity["2024-01-09"] == pytest.approx(10_000 - 10 * 1)  # 111で買って終値110
+    assert res.equity["2024-01-11"] == pytest.approx(9_900)
 
 
 def test_gap_down_exits_at_open_not_at_stop():
@@ -63,30 +63,30 @@ def test_gap_down_exits_at_open_not_at_stop():
     low = [108.0, 108.0, 108.0, 88.0, 108.0, 108.0, 108.0, 108.0]
     res = run_backtest(make_panels({"A": {"adj_open": opn, "adj_low": low}}), PARAMS, NO_COST,
                        DATES[0], DATES[4], 10_000)
-    # 損切り100だが火曜は90で寄り付いた → 90でしか売れない。損失 = 10株×20 = 200
+    # 損切り100だが水曜は90で寄り付いた → 90でしか売れない。損失 = 10株×20 = 200
     assert res.trades[0]["pnl"] == pytest.approx(-200.0)
 
 
 def test_exit_when_close_below_sma50_executes_next_open():
     close = [110.0, 110.0, 110.0, 104.0, 106.0, 106.0, 106.0, 106.0]
-    sma50 = [100.0, 100.0, 100.0, 105.0, 105.0, 105.0, 105.0, 105.0]  # 火曜に終値 < SMA50
+    sma50 = [100.0, 100.0, 100.0, 105.0, 105.0, 105.0, 105.0, 105.0]  # 水曜に終値 < SMA50
     opn = [110.0, 110.0, 110.0, 110.0, 107.0, 110.0, 110.0, 110.0]
     low = [103.0] * 8
     res = run_backtest(make_panels({"A": {"adj_close": close, "close": close, "sma50": sma50,
                                           "adj_open": opn, "adj_low": low}}),
                        PARAMS, NO_COST, DATES[0], DATES[5], 10_000)
     t = res.trades[0]
-    assert (t["exit_date"], t["reason"]) == ("2024-01-10", "below_sma")  # 水曜の始値107で売る
+    assert (t["exit_date"], t["reason"]) == ("2024-01-11", "below_sma")  # 木曜の始値107で売る
     assert t["pnl"] == pytest.approx(10 * (107 - 110))
 
 
 def test_weekly_rebalance_sells_rank_out_and_buys_new_leader():
     mom_a = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.1, 0.1]
-    mom_b = [0.2] * 8  # 2週目の金曜に B が A を逆転
+    mom_b = [0.2] * 8  # 2週目の月曜に B が A を逆転
     res = run_backtest(make_panels({"A": {"mom_6_1": mom_a}, "B": {"mom_6_1": mom_b}}),
                        PARAMS, NO_COST, DATES[0], DATES[7], 10_000)
-    assert [(t["symbol"], t["exit_date"], t["reason"]) for t in res.trades] == [("A", "2024-01-15", "rank_out")]
-    assert res.open_positions == 1  # 月曜に B を買っている
+    assert [(t["symbol"], t["exit_date"], t["reason"]) for t in res.trades] == [("A", "2024-01-16", "rank_out")]
+    assert res.open_positions == 1  # 火曜に B を買っている
 
 
 def test_costs_reduce_pnl():
@@ -119,7 +119,7 @@ def test_cagr_and_max_drawdown_by_hand():
 def test_hold_rank_keeps_position_that_slipped_slightly():
     """上位1で買い、2位以内なら持ち続ける設定では、順位が1つ落ちただけでは売らない。"""
     mom_a = [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.1, 0.1]
-    mom_b = [0.2] * 8  # 2週目の金曜に B が A を逆転
+    mom_b = [0.2] * 8  # 2週目の月曜に B が A を逆転
     params = StrategyParams(top_n=1, hold_rank=2, lot_size=1)
     res = run_backtest(make_panels({"A": {"mom_6_1": mom_a}, "B": {"mom_6_1": mom_b}}),
                        params, NO_COST, DATES[0], DATES[7], 10_000)
@@ -129,9 +129,10 @@ def test_hold_rank_keeps_position_that_slipped_slightly():
 def test_monthly_rebalance_and_exit_sma_option():
     from stockalert.backtest import is_rebalance_day
 
-    assert is_rebalance_day("2024-01-31", "2024-02-01", "monthly")
-    assert not is_rebalance_day("2024-01-26", "2024-01-29", "monthly")  # 週末だが月末ではない
-    assert is_rebalance_day("2024-01-26", "2024-01-29", "weekly")
+    assert is_rebalance_day("2024-01-31", "2024-02-01", "monthly")      # 2/1 は月の最初の営業日
+    assert not is_rebalance_day("2024-01-26", "2024-01-29", "monthly")  # 週の最初だが月の最初ではない
+    assert is_rebalance_day("2024-01-26", "2024-01-29", "weekly")       # 1/29(月) は週の最初の営業日
+    assert not is_rebalance_day("2024-01-29", "2024-01-30", "weekly")
 
     # 終値104は SMA50(105) を下回るが SMA200(90) より上 → exit_sma="sma200" なら売らない
     close = [110.0, 110.0, 110.0, 104.0, 106.0, 106.0, 106.0, 106.0]

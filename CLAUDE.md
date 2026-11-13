@@ -20,12 +20,16 @@
 
 ## 現状（2026-11-13）
 
-M1〜M3 実装済み、pytest 32件成功。GitHub: juza-w/jquants_auto（main）。M4〜M6 未着手。構成:
+M1〜M6 実装済み、pytest 41件成功。GitHub: juza-w/jquants_auto（main、記録は state ブランチ）。
+M4〜M6 は実API（Claude・Discord・GitHub Actions）での動作確認がまだ。構成:
 
 - `stockalert/sources/base.py` DataSource インターフェースと共通列
 - `stockalert/sources/jquants.py` 日本株 / `yfinance_source.py` 米国株（将来 moomoo に差し替え）
 - `stockalert/db.py` SQLite upsert / `updater.py` 増分更新と分割検知 / `update.py` 実行入口
 - `stockalert/indicators.py` 指標 / `strategy.py` 戦略のルール（現在 v2）/ `backtest.py` 検証 / `scripts/grid_search.py` 作る用期間だけの比較
+- `stockalert/signals.py` 今日のシグナル（バックテストのエンジンを最新日まで走らせ、残った注文を使う）
+- `stockalert/judge.py` Claude 判断層 / `notify.py` Discord / `proposals.py` 記録 / `run.py` 毎日の実行入口
+- `.github/workflows/daily-alert.yml` 定期実行。Secrets: JQUANTS_API_KEY, ANTHROPIC_API_KEY, DISCORD_WEBHOOK_URL
 - `watchlist.txt` 日本 TOPIX100 + 米国50 + ベンチマーク（1306.JP, SPY.US）
 
 ## 確認済みの事実
@@ -39,6 +43,11 @@ M1〜M3 実装済み、pytest 32件成功。GitHub: juza-w/jquants_auto（main�
   429 には Retry-After がなく、1〜2分待つのが公式推奨。
 - `GET /v2/equities/master` の行: `Date, Code, CoName, CoNameEn, S17, S17Nm, S33, S33Nm, ScaleCat, Mkt, MktNm, Mrgn, MrgnNm, ProdCat`。
 - 公式リファレンス: `https://jpx-jquants.com/ja/spec/<ページ名>`（eq-bars-daily, rate-limits, pagination, data-update, data-spec, mkt-cal, idx-bars-daily-topix）。
+- Discord Execute Webhook: POST <URL>?wait=true、JSON `{"content": ...}`、2000文字まで（公式ドキュメントで確認）。
+- Claude API（anthropic SDK 2.8 の型で確認）: `client.beta.messages.create(model="claude-opus-5-5", betas=["server-side-fallback-2026-07-01"],
+  fallbacks="default", output_config={"effort":..., "format": {"type":"json_schema","schema":...}})`、
+  Web検索は `tools=[{"type":"web_search_20260209","name":"web_search","max_uses":3}]`。**実APIでは未実行。**
+  クラウドの開発環境からは Claude API を呼べない（キーを渡せない）ので、確認は GitHub Actions で行う。
 - yfinance 1.8 `Ticker.history(auto_adjust=False, actions=True)`: 列 `Open, High, Low, Close, Adj Close, Volume, Dividends, Stock Splits`、
   インデックスは America/New_York。Close は分割調整済み。
 
@@ -53,18 +62,12 @@ M1〜M3 実装済み、pytest 32件成功。GitHub: juza-w/jquants_auto（main�
   結果: 日本は検証用でBM未満（不採用）、米国は僅差でBM超え（生存者バイアスあり）。
 - バックテストは終値で判断 → 翌営業日の始値で約定。コスト・資金は `backtest.py` の `MARKETS`（仮定値）。
 
-## 未解決（開発者に確認が必要）
+## 未解決
 
-1. 日本株は v2 も不採用相当。通知は米国株だけにするか、日本株は「参考」として出すか。
-2. 実際の資金額と証券会社の手数料（バックテストの仮定値を直す）。
-3. 通知先（仕様は Discord webhook。メール・LINE の希望もあり）。
-4. どこで定期実行するか（Windows のタスクスケジューラ / GitHub Actions など）。
-
-## 残作業
-
-- M4: シグナルが出た銘柄だけ Claude API に渡し、JSON
-  `symbol, action(buy/sell/hold), reasons[], risks[], entry, stop_loss, take_profit, invalidation, confidence`
-  を返させる。根拠は渡したデータからのみ引用させる。API の仕様は推測せず確認する。キーは `.env` の `ANTHROPIC_API_KEY`。
-- M5: Discord webhook 通知。全判断案とその後の値動きを `proposals` テーブルに記録。
-- M6: 日本株は東証の引け後（J-Quants 更新の16:30以降）、米国株は NY の引け後。取引所の現地時間基準
-  （夏時間の切替日は国で違う）。
+1. GitHub Secrets 登録後の初回実行で、Claude API（構造化出力と fallbacks の併用、Web検索）と Discord が
+   実際に通るか確認する。失敗しても通知はルールのシグナルだけで届く作り（エラーは通知とログに出る）。
+2. ベンチマークに勝てると検証できた戦略がない（README）。v2 は判断日を1日ずらすだけで検証結果が崩れた。
+   次の改良は proposals の実績を見てから。検証用期間をこれ以上使わない。
+3. 実際の資金額と証券会社の手数料（`backtest.py` の `MARKETS` は仮定値）。
+4. 通知は開発者の実際の保有を知らない（モデルポートフォリオ基準）。実保有を入力する仕組みは未実装。
+5. 入れ替え判断日を「週の最初の営業日」に変更済み（本番で翌営業日を知らずに判定するため）。

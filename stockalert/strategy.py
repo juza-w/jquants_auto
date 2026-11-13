@@ -21,7 +21,7 @@ class StrategyParams:
     atr_stop_mult: float = 2.0   # 損切り幅 = この倍率 × ATR(14)
     risk_per_trade: float = 0.01 # 1トレードの想定損失 = 資金のこの割合まで
     lot_size: int = 1            # 売買単位（日本株は100株）
-    rebalance: str = "weekly"    # 入れ替えの頻度: "weekly"（週の最終営業日）/ "monthly"（月の最終営業日）
+    rebalance: str = "weekly"    # 入れ替えの頻度: "weekly"（週の最初の営業日）/ "monthly"（月の最初の営業日）
     hold_rank: int | None = None # 保有中の銘柄はこの順位まで持ち続ける（None なら top_n と同じ）
     mom_col: str = "mom_6_1"     # ランキングに使う騰落率の列
     exit_sma: str = "sma50"      # 終値がこの移動平均を下回ったら手仕舞い

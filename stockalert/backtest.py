@@ -4,6 +4,7 @@
 
 先読みを避けるための約束:
   - 売買の判断は「その日の終値まで」の情報で行い、約定は「翌営業日の始値」。
+  - 銘柄の入れ替えは「週の最初の営業日の終値」で判断する。
   - 損切りは日中の安値が損切り価格に触れたら執行（窓を開けて下で始まったら始値で執行）。
 価格はすべて分割調整済み（配当は含まない。ベンチマークも同じ条件）。
 """
@@ -45,6 +46,11 @@ class Result:
     trades: list[dict] = field(default_factory=list)  # 決済済みトレード
     open_positions: int = 0
     skipped_buys: int = 0                 # 単元株が買えず見送った回数
+    # 最終日の終値時点の状態（本番のシグナル生成で使う）
+    positions: dict[str, Position] = field(default_factory=dict)
+    pending_buys: list[tuple[str, float, float]] = field(default_factory=list)  # 翌営業日に買う (銘柄, 株数, ATR)
+    pending_sells: dict[str, str] = field(default_factory=dict)                 # 翌営業日に売る 銘柄 -> 理由
+    ranking: list[str] = field(default_factory=list)                            # 最終日の買い候補の順位
 
 
 def build_panels(conn: sqlite3.Connection, symbols: list[str]) -> dict[str, pd.DataFrame]:
@@ -128,8 +134,8 @@ def run_backtest(panels: dict[str, pd.DataFrame], params: StrategyParams, costs:
             if c[sym] < snap.loc[sym, params.exit_sma]:
                 pending_sells.setdefault(sym, "below_sma")
 
-        if i + 1 < len(dates) and is_rebalance_day(day, dates[i + 1], params.rebalance):  # 定期の入れ替え
-            ranked = rank_candidates(snap, params)
+        ranked = rank_candidates(snap, params)
+        if i > 0 and is_rebalance_day(dates[i - 1], day, params.rebalance):  # 定期の入れ替え
             keep = set(ranked[: params.keep_rank])
             for sym in positions:
                 if sym not in keep:
@@ -151,14 +157,20 @@ def run_backtest(panels: dict[str, pd.DataFrame], params: StrategyParams, costs:
 
     result.equity = pd.Series(equity_curve)
     result.open_positions = len(positions)
+    result.positions, result.pending_buys, result.pending_sells = positions, pending_buys, pending_sells
+    result.ranking = ranked if dates else []
     return result
 
 
-def is_rebalance_day(day: str, next_day: str, rebalance: str) -> bool:
-    """day がその週（または月）の最後の営業日か。次の営業日が別の週・月なら True。"""
+def is_rebalance_day(prev_day: str, day: str, rebalance: str) -> bool:
+    """day がその週（または月）の最初の営業日か。前の営業日が別の週・月なら True。
+
+    「最後の営業日」ではなく「最初の営業日」で判定するのは、過去の情報だけで決められるため
+    （最後かどうかは翌営業日＝祝日の有無を知らないと分からない）。
+    """
     if rebalance == "monthly":
-        return day[:7] != next_day[:7]
-    a, b = pd.Timestamp(day).isocalendar(), pd.Timestamp(next_day).isocalendar()
+        return prev_day[:7] != day[:7]
+    a, b = pd.Timestamp(prev_day).isocalendar(), pd.Timestamp(day).isocalendar()
     return (a.year, a.week) != (b.year, b.week)
 
 

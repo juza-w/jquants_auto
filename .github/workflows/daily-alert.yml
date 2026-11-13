@@ -1,0 +1,84 @@
+# 毎営業日の定期実行（M6）
+# GitHub の cron は UTC 固定なので、取引所の現地時間で「必ず引け後」になる時刻を選んでいる。
+#   日本: 09:17 UTC = 18:17 JST（東証の引け 15:30、J-Quants の更新 16:30頃。日本に夏時間はない）
+#   米国: 22:37 UTC = 冬 17:37 / 夏 18:37 ニューヨーク時間（NYの引け 16:00。夏時間でも冬時間でも引け後）
+# 休場日はデータが増えないので、プログラム側が「通知済みの基準日」と判定して何もしない。
+name: daily-alert
+
+on:
+  schedule:
+    - cron: "17 9 * * 1-5"
+    - cron: "37 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      market:
+        description: "市場"
+        type: choice
+        options: [JP, US]
+        required: true
+      as_of:
+        description: "この日までのデータで実行（動作確認用 YYYY-MM-DD。空なら最新）"
+        required: false
+      dry_run:
+        description: "通知も記録もしない（ログに表示するだけ）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # state ブランチに記録を保存するため
+
+concurrency:
+  group: daily-alert
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MARKET: ${{ github.event_name == 'workflow_dispatch' && inputs.market || (github.event.schedule == '17 9 * * 1-5' && 'JP' || 'US') }}
+      AS_OF: ${{ inputs.as_of }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 記録用の state ブランチを取り出す
+        uses: actions/checkout@v4
+        with:
+          ref: state
+          path: state
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: 株価DBのキャッシュ（消えても全期間を取り直すだけ）
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: prices-${{ github.run_id }}
+          restore-keys: prices-
+
+      - name: 実行
+        env:
+          JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+          JQUANTS_REQUESTS_PER_MIN: "50"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          args="--market $MARKET"
+          if [ -n "$AS_OF" ]; then args="$args --as-of $AS_OF --force"; fi
+          if [ "$DRY_RUN" = "true" ]; then args="$args --dry-run"; fi
+          python -m stockalert.run $args
+
+      - name: 記録を state ブランチに保存
+        if: always()
+        working-directory: state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || (git commit -m "state: $MARKET $(date -u +%F)" && git push)
