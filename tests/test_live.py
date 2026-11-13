@@ -80,6 +80,10 @@ def test_make_client_returns_none_without_key(monkeypatch):
     assert judge.make_client() is None
     monkeypatch.setenv("ANTHROPIC_API_KEY", "  sk-test-key\n")  # 前後の空白・改行は取り除く
     assert judge.make_client().api_key == "sk-test-key"
+    monkeypatch.setenv("ANTHROPIC_API_KEY", 'curl https://example\n --header "x-api-key: sk-secret"')
+    with pytest.raises(ValueError) as err:  # コマンド例ごと貼り付けた場合は、値を表示せずに知らせる
+        judge.make_client()
+    assert "sk-secret" not in str(err.value)
 
 
 # ---- 通知 -------------------------------------------------------------------

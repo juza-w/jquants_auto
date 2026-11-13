@@ -69,14 +69,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{market} {sig['date']} は通知済み（休場日または再実行）。何もしません。")
             return 0
 
-    client = None if args.no_claude else judge.make_client()
+    client, client_error = None, "Claude 判断は無効（API キー未設定または --no-claude）"
+    if not args.no_claude:
+        try:
+            client = judge.make_client()
+        except ValueError as exc:  # キーの形式がおかしい。通知はルールのシグナルだけで続ける
+            client_error = str(exc)
+            print(f"[Claude NG] {client_error}")
     use_news = not args.no_news and os.environ.get("NEWS_SEARCH", "1") != "0"
     messages = [notify.format_header(sig)]
     for kind, items in (("sell", sig["sells"]), ("buy", sig["buys"])):
         for item in items:
             proposal, error = None, None
             if client is None:
-                error = "Claude 判断は無効（API キー未設定または --no-claude）"
+                error = client_error
             else:
                 try:
                     packet = judge.build_packet(conn, item, kind, sig)
@@ -84,8 +90,8 @@ def main(argv: list[str] | None = None) -> int:
                     proposal = judge.judge(client, packet, news)
                 except Exception as exc:  # noqa: BLE001 - Claude が失敗してもルールのシグナルは届ける
                     error = f"{type(exc).__name__}: {str(exc)[:200]}"
-                    if exc.__cause__ is not None:  # 接続エラーなどの本当の原因
-                        error += f"（原因: {type(exc.__cause__).__name__}: {str(exc.__cause__)[:120]}）"
+                    if exc.__cause__ is not None:  # 原因は種類だけ出す（本文には秘密の値が混じることがある）
+                        error += f"（原因: {type(exc.__cause__).__name__}）"
                     print(f"[Claude NG] {item['symbol']}: {error}")
             if not args.dry_run:
                 proposals.record(state, market, sig["date"], kind, item, proposal,

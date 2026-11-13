@@ -172,6 +172,9 @@ def make_client():
     key = os.environ.get("ANTHROPIC_API_KEY", "").strip()  # 貼り付け時に混じった改行・空白を除く
     if not key:
         return None
+    if any(c.isspace() for c in key):
+        # キー以外の文字列（コマンド例など）を貼り付けた場合。値そのものは表示しない。
+        raise ValueError("ANTHROPIC_API_KEY に空白や改行が含まれています。キーの文字列だけを登録してください")
     import anthropic
 
     return anthropic.Anthropic(api_key=key)
