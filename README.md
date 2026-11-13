@@ -10,9 +10,9 @@
 | M1 データ基盤 | 完了 |
 | M2 指標 | 完了 |
 | M3 戦略とバックテスト | 完了。**ベンチマークに勝てると検証できた戦略はまだない**（下記） |
-| M4 Claude判断層（ニュース検索付き） | 実装済み。実APIでの確認は GitHub Actions で行う |
-| M5 通知（Discord）と記録（proposals） | 実装済み。同上 |
-| M6 定期実行（GitHub Actions） | 設定済み。Secrets の登録が必要（下記） |
+| M4 Claude判断層（ニュース検索付き） | 完了（実APIで動作確認済み） |
+| M5 通知（Discord）と記録（proposals） | 完了（同上） |
+| M6 定期実行（GitHub Actions） | 稼働中 |
 
 ## 毎日の流れ
 

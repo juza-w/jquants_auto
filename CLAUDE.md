@@ -21,7 +21,7 @@
 ## 現状（2026-11-13）
 
 M1〜M6 実装済み、pytest 41件成功。GitHub: juza-w/jquants_auto（main、記録は state ブランチ）。
-M4〜M6 は実API（Claude・Discord・GitHub Actions）での動作確認がまだ。構成:
+M4〜M6 も GitHub Actions 上で実API（Claude・Web検索・Discord）の動作確認済み（2026-11-13、基準日 2026-11-09 の日本株5件）。構成:
 
 - `stockalert/sources/base.py` DataSource インターフェースと共通列
 - `stockalert/sources/jquants.py` 日本株 / `yfinance_source.py` 米国株（将来 moomoo に差し替え）
@@ -46,7 +46,7 @@ M4〜M6 は実API（Claude・Discord・GitHub Actions）での動作確認がま
 - Discord Execute Webhook: POST <URL>?wait=true、JSON `{"content": ...}`、2000文字まで（公式ドキュメントで確認）。
 - Claude API（anthropic SDK 2.8 の型で確認）: `client.beta.messages.create(model="claude-opus-5-5", betas=["server-side-fallback-2026-07-01"],
   fallbacks="default", output_config={"effort":..., "format": {"type":"json_schema","schema":...}})`、
-  Web検索は `tools=[{"type":"web_search_20260209","name":"web_search","max_uses":3}]`。**実APIでは未実行。**
+  Web検索は `tools=[{"type":"web_search_20260209","name":"web_search","max_uses":3}]`。実APIで動作確認済み。
   クラウドの開発環境からは Claude API を呼べない（キーを渡せない）ので、確認は GitHub Actions で行う。
 - yfinance 1.8 `Ticker.history(auto_adjust=False, actions=True)`: 列 `Open, High, Low, Close, Adj Close, Volume, Dividends, Stock Splits`、
   インデックスは America/New_York。Close は分割調整済み。
@@ -64,10 +64,13 @@ M4〜M6 は実API（Claude・Discord・GitHub Actions）での動作確認がま
 
 ## 未解決
 
-1. GitHub Secrets 登録後の初回実行で、Claude API（構造化出力と fallbacks の併用、Web検索）と Discord が
-   実際に通るか確認する。失敗しても通知はルールのシグナルだけで届く作り（エラーは通知とログに出る）。
+1. 秘密情報の扱い: リポジトリは public。エラー本文をログ・通知・記録に出さない（過去に API キーの断片を
+   出してしまった。`state` ブランチの過去コミット fcf6b4f に断片が残るが、そのキーは無効化済みの想定）。
+   Secret にはキーの文字列1行だけを登録する。
 2. ベンチマークに勝てると検証できた戦略がない（README）。v2 は判断日を1日ずらすだけで検証結果が崩れた。
    次の改良は proposals の実績を見てから。検証用期間をこれ以上使わない。
 3. 実際の資金額と証券会社の手数料（`backtest.py` の `MARKETS` は仮定値）。
 4. 通知は開発者の実際の保有を知らない（モデルポートフォリオ基準）。実保有を入力する仕組みは未実装。
 5. 入れ替え判断日を「週の最初の営業日」に変更済み（本番で翌営業日を知らずに判定するため）。
+6. 初回の実運用テストでは Claude の判断が5件すべて「見送り」（決算直前・短期の勢い低下が理由）。
+   慎重すぎるかどうかは proposals の実績（見送った銘柄のその後）で判断する。
