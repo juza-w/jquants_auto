@@ -78,6 +78,8 @@ def test_proposal_schema_is_strict():
 def test_make_client_returns_none_without_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     assert judge.make_client() is None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "  sk-test-key\n")  # 前後の空白・改行は取り除く
+    assert judge.make_client().api_key == "sk-test-key"
 
 
 # ---- 通知 -------------------------------------------------------------------

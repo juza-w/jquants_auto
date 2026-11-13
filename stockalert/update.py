@@ -34,7 +34,7 @@ def build_sources(markets: set[str]) -> dict:
         from .sources.jquants import JQuantsSource
 
         sources["JP"] = JQuantsSource(
-            api_key=os.environ.get("JQUANTS_API_KEY", ""),
+            api_key=os.environ.get("JQUANTS_API_KEY", "").strip(),
             requests_per_min=int(os.environ.get("JQUANTS_REQUESTS_PER_MIN", "5")),
         )
     if "US" in markets:

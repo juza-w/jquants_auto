@@ -95,7 +95,7 @@ def split_message(text: str, limit: int = LIMIT) -> list[str]:
 
 def send(messages: list[str], webhook_url: str | None = None, post=requests.post, sleep=time.sleep) -> bool:
     """Discord に送る。URL が無ければ標準出力に出すだけ（False を返す）。"""
-    url = webhook_url if webhook_url is not None else os.environ.get("DISCORD_WEBHOOK_URL", "")
+    url = (webhook_url if webhook_url is not None else os.environ.get("DISCORD_WEBHOOK_URL", "")).strip()
     chunks = [c for m in messages for c in split_message(m)]
     if not url:
         print("\n\n".join(chunks))

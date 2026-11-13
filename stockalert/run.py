@@ -84,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
                     proposal = judge.judge(client, packet, news)
                 except Exception as exc:  # noqa: BLE001 - Claude が失敗してもルールのシグナルは届ける
                     error = f"{type(exc).__name__}: {str(exc)[:200]}"
+                    if exc.__cause__ is not None:  # 接続エラーなどの本当の原因
+                        error += f"（原因: {type(exc.__cause__).__name__}: {str(exc.__cause__)[:120]}）"
                     print(f"[Claude NG] {item['symbol']}: {error}")
             if not args.dry_run:
                 proposals.record(state, market, sig["date"], kind, item, proposal,

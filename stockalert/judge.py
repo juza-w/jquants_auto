@@ -169,8 +169,9 @@ def validate_proposal(p: dict, packet: dict) -> dict:
 
 def make_client():
     """ANTHROPIC_API_KEY があればクライアントを返す。なければ None（Claude なしで動かす）。"""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()  # 貼り付け時に混じった改行・空白を除く
+    if not key:
         return None
     import anthropic
 
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(api_key=key)
